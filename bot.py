@@ -1,32 +1,28 @@
 import telebot
 import requests
 import os
-import base64
 
-# ===== CONFIG =====
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 SYSTEM_PROMPT = """
-তুমি একটি অত্যন্ত বুদ্ধিমান Vision AI।
+তুমি একজন খুব বুদ্ধিমান, বন্ধুসুলভ মানুষসুলভ সহকারী।
 
-তুমি English, Bangla, Hindi, Nepali সব ভাষা বুঝতে পারো।
-কিন্তু তুমি সব সময় উত্তর শুধু পরিষ্কার বাংলায় দেবে।
+নিয়ম:
+- ব্যবহারকারী English লিখলে → সুন্দর ও স্বাভাবিক বাংলায় উত্তর দেবে
+- Bangla, Hindi, Nepali লিখলেও → বাংলায় উত্তর দেবে
+- মানুষের মতো করে কথা বলবে
+- কখনো বলবে না “আমি একটি AI মডেল / প্রোগ্রাম”
+- উত্তর হবে পরিষ্কার, কাজে লাগার মতো, উদাহরণসহ
+- অহেতুক লম্বা বা রোবট টাইপ কথা বলবে না
 
-যদি ছবি আসে, তাহলে:
-- ছবিতে কী আছে বলবে
-- এটা কিসের জন্য ব্যবহার হয়
-- কী কী করা যেতে পারে
-- দরকারি পরামর্শ দেবে
-
-তুমি ChatGPT-এর মতো বন্ধুসুলভভাবে কথা বলবে।
+তোমার নাম: GM Assistant
 """
 
-# ===== TEXT AI =====
-def ai_text(prompt):
+def ai_reply(text):
+    url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json"
@@ -36,90 +32,38 @@ def ai_text(prompt):
         "model": "llama-3.1-8b-instant",
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": prompt}
+            {"role": "user", "content": text}
         ],
-        "temperature": 0.7,
-        "max_tokens": 700
+        "temperature": 0.8,
+        "max_tokens": 600
     }
 
-    r = requests.post(GROQ_URL, headers=headers, json=data, timeout=60)
-    res = r.json()
+    try:
+        r = requests.post(url, headers=headers, json=data, timeout=60)
+        res = r.json()
+        return res["choices"][0]["message"]["content"]
+    except Exception as e:
+        print("ERROR:", e)
+        return "এখন একটু সমস্যা হচ্ছে, একটু পর আবার লিখো 🙂"
 
-    if "choices" not in res:
-        print(res)
-        return "⚠️ AI এখন কাজ করছে না, পরে আবার চেষ্টা করো।"
 
-    return res["choices"][0]["message"]["content"]
-
-# ===== VISION AI =====
-def ai_vision(img_b64, caption=""):
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    data = {
-        "model": "llama-3.2-11b-vision-preview",
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": caption or "এই ছবিটা বিশ্লেষণ করো"},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
-                ]
-            }
-        ],
-        "max_tokens": 900
-    }
-
-    r = requests.post(GROQ_URL, headers=headers, json=data, timeout=120)
-    res = r.json()
-
-    if "choices" not in res:
-        print(res)
-        return "⚠️ ছবি বুঝতে সমস্যা হচ্ছে, পরে আবার পাঠাও।"
-
-    return res["choices"][0]["message"]["content"]
-
-# ===== START =====
 @bot.message_handler(commands=["start"])
-def start(msg):
-    bot.reply_to(msg,
-"""🤖 হ্যালো! আমি Bangla Vision AI Bot
+def start(m):
+    bot.reply_to(m,
+        "👋 হ্যালো!\n"
+        "আমি GM Assistant.\n\n"
+        "তুমি Bangla / English / Hindi / Nepali যেকোনো ভাষায় লিখতে পারো।\n"
+        "English লিখলেও আমি বাংলায় বুঝিয়ে বলবো 🙂\n\n"
+        "যা খুশি লিখে শুরু করো।"
+    )
 
-তুমি যেকোনো ভাষায় লেখো  
-আমি সব বাংলায় বুঝিয়ে উত্তর দেব।
 
-✍ লেখা পাঠাও  
-📸 ছবি পাঠাও → এটা কী, কিসের জন্য, কী করা যায় বলব
-""")
+@bot.message_handler(func=lambda m: True)
+def chat(m):
+    bot.send_chat_action(m.chat.id, 'typing')
+    reply = ai_reply(m.text)
+    bot.reply_to(m, reply)
 
-# ===== TEXT =====
-@bot.message_handler(func=lambda m: m.content_type == "text")
-def chat(msg):
-    try:
-        bot.send_chat_action(msg.chat.id, "typing")
-        reply = ai_text(msg.text)
-        bot.reply_to(msg, reply)
-    except Exception as e:
-        print(e)
-        bot.reply_to(msg, "⚠️ সার্ভার সমস্যা হচ্ছে, পরে আবার চেষ্টা করো।")
 
-# ===== PHOTO =====
-@bot.message_handler(content_types=["photo"])
-def photo(msg):
-    try:
-        bot.send_chat_action(msg.chat.id, "typing")
-        file_info = bot.get_file(msg.photo[-1].file_id)
-        img = bot.download_file(file_info.file_path)
-        b64 = base64.b64encode(img).decode()
-
-        reply = ai_vision(b64, msg.caption or "")
-        bot.reply_to(msg, reply)
-    except Exception as e:
-        print(e)
-        bot.reply_to(msg, "⚠️ ছবি বুঝতে পারিনি, আবার পাঠাও।")
-
-print("🤖 Bangla Vision AI Bot running...")
+print("🤖 GM Assistant is running...")
 bot.infinity_polling()
