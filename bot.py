@@ -1,39 +1,28 @@
 import telebot
 import requests
 import os
+from langdetect import detect
 
-# =========================
-# 🔑 ENV KEYS (Railway safe)
-# =========================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-# =========================
-# 🧠 SYSTEM PROMPT
-# =========================
-SYSTEM_PROMPT = """
-তুমি GM Translator।
+def translate_to_bn(text):
+    try:
+        url = "https://libretranslate.com/translate"
+        data = {
+            "q": text,
+            "source": "auto",
+            "target": "bn",
+            "format": "text"
+        }
+        r = requests.post(url, data=data, timeout=20)
+        return r.json()["translatedText"]
+    except:
+        return text
 
-কঠোর নিয়ম:
-- তুমি শুধুমাত্র অনুবাদ করবে
-- কোনো প্রশ্নের উত্তর, ব্যাখ্যা, উপদেশ কিছুই দেবে না
-- বাড়তি কথা লিখবে না
-
-ভাষা নিয়ম:
-- User যদি English লেখে → শুধু পরিষ্কার বাংলায় অনুবাদ করবে
-- User যদি Bangla লেখে → শুধু পরিষ্কার English এ অনুবাদ করবে
-- User যদি Hindi / Nepali লেখে → বাংলায় অনুবাদ করবে
-
-ফরম্যাট:
-শুধু অনুবাদ লিখবে, অন্য কিছু না।
-"""
-
-# =========================
-# 🤖 GROQ AI FUNCTION
-# =========================
-def ai_translate(text):
+def groq_chat(prompt):
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -43,51 +32,46 @@ def ai_translate(text):
     data = {
         "model": "llama-3.1-8b-instant",
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": text}
+            {
+                "role": "system",
+                "content": "You are a helpful AI. Always reply clearly in Bangla. Do not lie. Do not pretend to be human."
+            },
+            {"role": "user", "content": prompt}
         ],
-        "temperature": 0.2,
-        "max_tokens": 300
+        "temperature": 0.4
     }
 
     r = requests.post(url, headers=headers, json=data, timeout=60)
     res = r.json()
-
-    if "choices" not in res:
-        print("GROQ ERROR:", res)
-        return "⚠️ অনুবাদ করা যাচ্ছে না"
-
     return res["choices"][0]["message"]["content"]
 
-
-# =========================
-# 📌 START
-# =========================
-@bot.message_handler(commands=['start'])
-def start(m):
-    bot.reply_to(m,
-        "🌐 GM Translator Bot\n\n"
-        "আমি শুধু অনুবাদ করি:\n"
-        "English ↔ Bangla\n"
-        "Hindi/Nepali → Bangla\n\n"
-        "যা খুশি লিখুন 👇"
+@bot.message_handler(commands=["start"])
+def start(msg):
+    bot.reply_to(msg, 
+    "🤖 GM Free AI Bot\n\n"
+    "✔ English → বাংলা অনুবাদ\n"
+    "✔ Bangla / Hindi / Nepali বোঝে\n"
+    "✔ Normal প্রশ্নের উত্তর দেয়\n\n"
+    "👉 যা খুশি লিখো"
     )
 
-
-# =========================
-# 💬 ALL MESSAGE HANDLER
-# =========================
 @bot.message_handler(func=lambda m: True)
-def chat(m):
+def chat(msg):
     try:
-        bot.send_chat_action(m.chat.id, 'typing')
-        reply = ai_translate(m.text)
-        bot.reply_to(m, reply)
+        bot.send_chat_action(msg.chat.id, "typing")
+
+        user_text = msg.text
+        lang = detect(user_text)
+
+        if lang != "bn":
+            user_text = translate_to_bn(user_text)
+
+        reply = groq_chat(user_text)
+        bot.reply_to(msg, reply)
+
     except Exception as e:
         print("ERROR:", e)
-        bot.reply_to(m, "⚠️ Server error, পরে চেষ্টা করুন")
+        bot.reply_to(msg, "⚠️ এখন AI কাজ করছে না, পরে চেষ্টা করো।")
 
-
-# =========================
-print("🤖 GM Translator Bot running...")
+print("Bot running...")
 bot.infinity_polling()
